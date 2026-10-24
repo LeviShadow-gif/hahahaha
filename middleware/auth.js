@@ -4,14 +4,14 @@
  * Authentication Middleware
  * --------------------------------------------------------
  *
- * Node.js + Express compatible
+ * Node.js + Express
+ * JWT verification using existing utils/jwt.js
  *
- * Responsibilities:
- * - Read JWT from incoming request
- * - Verify JWT using existing utils/jwt.js
- * - Attach authenticated user to req.user
- * - Provide admin-role protection
- * - Keep existing verifyRequest() JWT logic
+ * Exports:
+ * - authenticate
+ * - requireAdmin
+ *
+ * No dependency on utils/response.js
  * --------------------------------------------------------
  */
 
@@ -21,241 +21,94 @@ import {
     verifyRequest
 } from "../utils/jwt.js";
 
-import {
-    errorResponse
-} from "../utils/response.js";
-
-
 /**
  * --------------------------------------------------------
- * Unauthorized Response
+ * Error Responses
  * --------------------------------------------------------
  */
 
-function unauthorized(
-    res,
-    message = "Unauthorized."
-) {
-
-    return res.status(401).json(
-        errorResponse(
-            message,
-            401
-        )
-    );
-
+function unauthorized(res, message = "Unauthorized.") {
+    return res.status(401).json({
+        success: false,
+        message,
+        timestamp: new Date().toISOString()
+    });
 }
 
-
-/**
- * --------------------------------------------------------
- * Forbidden Response
- * --------------------------------------------------------
- */
-
-function forbidden(
-    res,
-    message = "Forbidden."
-) {
-
-    return res.status(403).json(
-        errorResponse(
-            message,
-            403
-        )
-    );
-
+function forbidden(res, message = "Forbidden.") {
+    return res.status(403).json({
+        success: false,
+        message,
+        timestamp: new Date().toISOString()
+    });
 }
-
 
 /**
  * --------------------------------------------------------
  * Build Web Request For Existing JWT Utility
  * --------------------------------------------------------
- *
- * Existing jwt.js was originally written around the
- * Web Request API used by Cloudflare Workers.
- *
- * Node.js provides the Web Request API as well, so we
- * create a small compatible Request object from Express.
- *
- * This allows us to keep the existing JWT verification
- * implementation instead of rewriting it here.
- * --------------------------------------------------------
  */
 
 function createVerificationRequest(req) {
-
     const headers = new Headers();
 
-    for (
-        const [key, value]
-        of Object.entries(req.headers)
-    ) {
-
-        if (
-            Array.isArray(value)
-        ) {
-
-            headers.set(
-                key,
-                value.join(", ")
-            );
-
-        } else if (
-            value !== undefined
-        ) {
-
-            headers.set(
-                key,
-                String(value)
-            );
-
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (Array.isArray(value)) {
+            headers.set(key, value.join(", "));
+        } else if (value !== undefined) {
+            headers.set(key, String(value));
         }
-
     }
 
-    const protocol =
-        req.protocol || "http";
-
-    const host =
-        req.get("host") ||
-        "localhost";
-
-    const originalUrl =
-        req.originalUrl ||
-        req.url ||
-        "/";
-
-    const url =
-        `${protocol}://${host}${originalUrl}`;
+    const protocol = req.protocol || "http";
+    const host = req.get("host") || "localhost";
+    const originalUrl = req.originalUrl || req.url || "/";
 
     return new Request(
-        url,
+        `${protocol}://${host}${originalUrl}`,
         {
-            method:
-                req.method || "GET",
-
+            method: req.method || "GET",
             headers
         }
     );
-
 }
-
 
 /**
  * --------------------------------------------------------
- * Authenticate Request
- * --------------------------------------------------------
- *
- * Express middleware.
- *
- * On success:
- *
- *     req.user
- *
- * will contain the verified JWT payload.
- *
- * On failure:
- *
- *     401 Unauthorized
- *
- * is returned and next() is NOT called.
+ * Authenticate
  * --------------------------------------------------------
  */
 
-export async function authenticate(
-    req,
-    res,
-    next
-) {
-
+export async function authenticate(req, res, next) {
     try {
-
-        /**
-         * ----------------------------------------------
-         * Create Web-compatible request
-         * ----------------------------------------------
-         */
-
         const verificationRequest =
-            createVerificationRequest(
-                req
-            );
+            createVerificationRequest(req);
 
+        const result = await verifyRequest(
+            verificationRequest
+        );
 
-        /**
-         * ----------------------------------------------
-         * Verify JWT
-         * ----------------------------------------------
-         */
-
-        const result =
-            await verifyRequest(
-                verificationRequest
-            );
-
-
-        /**
-         * ----------------------------------------------
-         * Invalid / Missing Token
-         * ----------------------------------------------
-         */
-
-        if (
-            !result ||
-            !result.valid
-        ) {
-
+        if (!result || !result.valid) {
             return unauthorized(
                 res,
                 result?.error ||
-                "Invalid authentication token."
+                    "Invalid authentication token."
             );
-
         }
-
-
-        /**
-         * ----------------------------------------------
-         * Verify Payload
-         * ----------------------------------------------
-         */
 
         if (
             !result.payload ||
             typeof result.payload !== "object"
         ) {
-
             return unauthorized(
                 res,
                 "Invalid authentication payload."
             );
-
         }
 
+        req.user = result.payload;
 
-        /**
-         * ----------------------------------------------
-         * Attach User To Express Request
-         * ----------------------------------------------
-         */
-
-        req.user =
-            result.payload;
-
-
-        /**
-         * ----------------------------------------------
-         * Development Logging
-         * ----------------------------------------------
-         */
-
-        if (
-            ENV.NODE_ENV ===
-            "development"
-        ) {
-
+        if (ENV.NODE_ENV === "development") {
             const username =
                 result.payload.username ||
                 result.payload.email ||
@@ -265,152 +118,65 @@ export async function authenticate(
             console.log(
                 `[AUTH] ${username} authenticated.`
             );
-
         }
 
-
-        /**
-         * ----------------------------------------------
-         * Continue
-         * ----------------------------------------------
-         */
-
         return next();
-
     } catch (error) {
-
         console.error(
             "[AUTH] Authentication error:",
-            error
+            error.message
         );
 
         return unauthorized(
             res,
             "Authentication failed."
         );
-
     }
-
 }
-
 
 /**
  * --------------------------------------------------------
  * Require Admin
  * --------------------------------------------------------
- *
- * Protects routes that require:
- *
- *     req.user.role === "admin"
- *
- * Authentication is performed first.
- * --------------------------------------------------------
  */
 
-export async function requireAdmin(
-    req,
-    res,
-    next
-) {
-
+export async function requireAdmin(req, res, next) {
     try {
-
-        /**
-         * ----------------------------------------------
-         * Authenticate First
-         * ----------------------------------------------
-         */
-
         const verificationRequest =
-            createVerificationRequest(
-                req
-            );
+            createVerificationRequest(req);
 
-        const result =
-            await verifyRequest(
-                verificationRequest
-            );
+        const result = await verifyRequest(
+            verificationRequest
+        );
 
-
-        /**
-         * ----------------------------------------------
-         * Invalid Authentication
-         * ----------------------------------------------
-         */
-
-        if (
-            !result ||
-            !result.valid
-        ) {
-
+        if (!result || !result.valid) {
             return unauthorized(
                 res,
                 result?.error ||
-                "Invalid authentication token."
+                    "Invalid authentication token."
             );
-
         }
-
-
-        /**
-         * ----------------------------------------------
-         * Validate Payload
-         * ----------------------------------------------
-         */
 
         if (
             !result.payload ||
             typeof result.payload !== "object"
         ) {
-
             return unauthorized(
                 res,
                 "Invalid authentication payload."
             );
-
         }
 
+        req.user = result.payload;
 
-        /**
-         * ----------------------------------------------
-         * Attach User
-         * ----------------------------------------------
-         */
-
-        req.user =
-            result.payload;
-
-
-        /**
-         * ----------------------------------------------
-         * Verify Admin Role
-         * ----------------------------------------------
-         */
-
-        if (
-            result.payload.role !==
-            "admin"
-        ) {
-
+        if (result.payload.role !== "admin") {
             return forbidden(
                 res,
                 "Administrator access required."
             );
-
         }
 
-
-        /**
-         * ----------------------------------------------
-         * Development Logging
-         * ----------------------------------------------
-         */
-
-        if (
-            ENV.NODE_ENV ===
-            "development"
-        ) {
-
+        if (ENV.NODE_ENV === "development") {
             const username =
                 result.payload.username ||
                 result.payload.email ||
@@ -420,34 +186,21 @@ export async function requireAdmin(
             console.log(
                 `[AUTH] Admin ${username} authenticated.`
             );
-
         }
 
-
-        /**
-         * ----------------------------------------------
-         * Continue
-         * ----------------------------------------------
-         */
-
         return next();
-
     } catch (error) {
-
         console.error(
             "[AUTH] Admin authentication error:",
-            error
+            error.message
         );
 
         return unauthorized(
             res,
             "Authentication failed."
         );
-
     }
-
 }
-
 
 /**
  * --------------------------------------------------------
@@ -456,9 +209,6 @@ export async function requireAdmin(
  */
 
 export default {
-
     authenticate,
-
     requireAdmin
-
 };

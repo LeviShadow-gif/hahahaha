@@ -20,10 +20,6 @@ import express from "express";
 import ENV from "../config/env.js";
 
 import {
-    validateLogin
-} from "../utils/validator.js";
-
-import {
     sign,
     verify,
     extractBearerToken
@@ -168,7 +164,7 @@ async function handleLogin(
 
     const body =
         req.body &&
-        typeof req.body === "object"
+            typeof req.body === "object"
             ? req.body
             : {};
 
@@ -179,24 +175,41 @@ async function handleLogin(
      * ----------------------------------------------
      */
 
-    const validation =
-        validateLogin(
-            body.username,
-            body.password
-        );
+    const username =
+        typeof body.username === "string"
+            ? body.username.trim()
+            : "";
 
+    const password =
+        typeof body.password === "string"
+            ? body.password
+            : "";
 
-    if (
-        !validation.valid
-    ) {
-
+    if (!username || !password) {
         return sendError(
             res,
-            "Validation failed.",
+            "Username and password are required.",
             422,
-            validation.errors
+            {
+                username: !username
+                    ? "Username is required."
+                    : undefined,
+                password: !password
+                    ? "Password is required."
+                    : undefined
+            }
         );
+    }
 
+    if (
+        username.length > 100 ||
+        password.length > 1024
+    ) {
+        return sendError(
+            res,
+            "Invalid login input.",
+            422
+        );
     }
 
 
@@ -374,7 +387,7 @@ async function handleVerify(
             res,
 
             result?.error ||
-                "Invalid token.",
+            "Invalid token.",
 
             401
 
@@ -389,7 +402,7 @@ async function handleVerify(
      * ----------------------------------------------
      */
 
-    
+
 
     /**
      * ----------------------------------------------
@@ -489,7 +502,7 @@ router.post(
 
             const action =
                 typeof req.query.action === "string" &&
-                req.query.action.trim()
+                    req.query.action.trim()
                     ? req.query.action
                         .trim()
                         .toLowerCase()
@@ -567,7 +580,7 @@ router.post(
             );
 
         } catch (
-            error
+        error
         ) {
 
             /**
@@ -598,7 +611,7 @@ router.post(
                     res,
 
                     error?.message ||
-                        "Authentication request failed.",
+                    "Authentication request failed.",
 
                     500
 

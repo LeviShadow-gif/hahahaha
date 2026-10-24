@@ -212,3 +212,44 @@ export async function closeDB() {
     }
 
 }
+export async function getUsersCollection() {
+    const db = await connectDB();
+    const users = db.collection("users");
+
+    await Promise.all([
+        users.createIndex(
+            { usernameLower: 1 },
+            { unique: true, name: "unique_username_lower" }
+        ),
+        users.createIndex(
+            { email: 1 },
+            { unique: true, name: "unique_email" }
+        ),
+        users.createIndex(
+            { referralCode: 1 },
+            { unique: true, name: "unique_referral_code" }
+        )
+    ]);
+
+    return users;
+}
+export async function getReferralRedemptionsCollection() {
+    const db = await connectDB();
+    const redemptions = db.collection("referralRedemptions");
+
+    await Promise.all([
+        redemptions.createIndex(
+            { referrerId: 1, redeemerId: 1 },
+            {
+                unique: true,
+                name: "unique_referrer_redeemer"
+            }
+        ),
+        redemptions.createIndex(
+            { referrerId: 1, tier: 1 },
+            { name: "referrer_tier_lookup" }
+        )
+    ]);
+
+    return redemptions;
+}
