@@ -115,9 +115,9 @@ export async function authenticate(req, res, next) {
                 result.payload.userId ||
                 "unknown";
 
-            console.log(
-                `[AUTH] ${username} authenticated.`
-            );
+           // console.log(
+           //     `[AUTH] ${username} authenticated.`
+            //);
         }
 
         return next();
@@ -183,9 +183,9 @@ export async function requireAdmin(req, res, next) {
                 result.payload.userId ||
                 "unknown";
 
-            console.log(
-                `[AUTH] Admin ${username} authenticated.`
-            );
+            //console.log(
+           //     `[AUTH] Admin ${username} authenticated.`
+            //);
         }
 
         return next();
